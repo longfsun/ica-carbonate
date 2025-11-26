@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Global Carbonate I/Ca Database</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- DataTables CSS -->
+  <link
+    rel="stylesheet"
+    href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css"
+  />
+
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f5f5f5;
+    }
+    header {
+      background: #1b3b5f;
+      color: #ffffff;
+      padding: 1rem 2rem;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.6rem;
+    }
+    main {
+      padding: 1rem 2rem 2rem;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    .section-title {
+      margin-top: 1.5rem;
+      margin-bottom: 0.5rem;
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: #333;
+    }
+    #icaPlot {
+      width: 100%;
+      height: 450px;
+      margin: 1rem 0 2rem;
+      background: #ffffff;
+      border-radius: 4px;
+      box-shadow: 0 0 4px rgba(0,0,0,0.06);
+    }
+    .datatable-container {
+      background: #ffffff;
+      padding: 1rem;
+      border-radius: 4px;
+      box-shadow: 0 0 4px rgba(0,0,0,0.06);
+    }
+    footer {
+      text-align: center;
+      font-size: 0.8rem;
+      padding: 1rem 0 2rem;
+      color: #777;
+    }
+    table.dataTable thead th,
+    table.dataTable tbody td {
+      padding: 6px 8px;
+      font-size: 0.85rem;
+    }
+    .download-link {
+      margin: 1rem 0;
+      font-size: 0.9rem;
+      color: #555;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>Global Carbonate I/Ca Database</h1>
+  </header>
+
+  <main>
+    <!-- Age–I/Ca Scatter Plot -->
+    <div class="section-title">Age–I/Ca Scatter Plot</div>
+    <div id="icaPlot"></div>
+
+    <!-- Download full dataset -->
+    <div class="download-link">
+      <a href="data/ica_database.csv" download>Download full dataset (CSV)</a>
+    </div>
+
+    <!-- Data Browser Table -->
+    <div class="section-title">Data Browser</div>
+    <div class="datatable-container">
+      <table id="icaTable" class="display" style="width:100%">
+        <thead>
+          <tr>
+            <th>Sample ID</th>
+            <th>Section</th>
+            <th>Formation</th>
+            <th>Period</th>
+            <th>Age (Ma)</th>
+            <th>I/Ca (μmol/mol)</th>
+            <th>Mg/Ca (mmol/mol)</th>
+            <th>δ13C (‰)</th>
+            <th>δ18O (‰)</th>
+            <th>Reference</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </main>
+
+  <footer>
+    Carbonate I/Ca database portal (static prototype)
+  </footer>
+
+  <!-- JS libraries -->
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+  <script>
+    let icaTable = null;
+
+    function renderTable(rows) {
+      const tbody = document.querySelector("#icaTable tbody");
+      tbody.innerHTML = "";
+
+      rows.forEach(row => {
+        const tr = document.createElement("tr");
+        const addCell = v => {
+          const td = document.createElement("td");
+          td.textContent = v === null || v === undefined ? "" : v;
+          tr.appendChild(td);
+        };
+
+        addCell(row.Sample_ID);
+        addCell(row.Section);
+        addCell(row.Formation);
+        addCell(row.Period);
+        addCell(row.Age_Ma);
+        addCell(row.I_Ca);
+        addCell(row.Mg_Ca);
+        addCell(row.delta13C);
+        addCell(row.delta18O);
+        addCell(row.Reference);
+
+        tbody.appendChild(tr);
+      });
+
+      if (!icaTable) {
+        icaTable = $("#icaTable").DataTable({
+          pageLength: 20,
+          order: [[4,"asc"]]
+        });
+
+        icaTable.on("draw", updatePlot);
+      } else {
+        icaTable.clear();
+        $("#icaTable tbody tr").each(function(){
+          icaTable.row.add(
+            Array.from(this.cells).map(c=>c.textContent)
+          );
+        });
+        icaTable.draw();
+      }
+
+      updatePlot();
+    }
+
+    function updatePlot() {
+      if (!icaTable) return;
+      const data = icaTable.rows({ search: "applied" }).data().toArray();
+
+      const ages = [];
+      const icas = [];
+      const labels = [];
+
+      data.forEach(r => {
+        const age = parseFloat(r[4]);
+        const ica = parseFloat(r[5]);
+        if (!isNaN(age) && !isNaN(ica)) {
+          ages.push(age);
+          icas.push(ica);
+          labels.push(r[0]);
+        }
+      });
+
+      const trace = {
+        x: ages,
+        y: icas,
+        mode: "markers",
+        type: "scatter",
+        text: labels,
+        hovertemplate: "Sample: %{text}<br>Age: %{x} Ma<br>I/Ca: %{y}<extra></extra>",
+      };
+
+      const layout = {
+        xaxis: { title: "Age (Ma)", autorange: 'reversed' },
+        yaxis: { title: "I/Ca (μmol/mol)", rangemode: "tozero" },
+        margin: {t:20}
+      };
+
+      Plotly.newPlot("icaPlot", [trace], layout, { responsive: true });
+    }
+
+    function loadCSV() {
+      Papa.parse("data/ica_database.csv", {
+        download: true,
+        header: true,
+        dynamicTyping: true,
+        complete: r => {
+          const rows = r.data
+            .filter(x=>x.Sample_ID)
+            .map(x => ({
+              Sample_ID: x.Sample_ID,
+              Section: x.Section || "",
+              Formation: x.Formation || "",
+              Period: x.Period || "",
+              Age_Ma: x.Age_Ma,
+              I_Ca: x.I_Ca_umol_per_mol || x.I_Ca || x["I/Ca"] || "",
+              Mg_Ca: x.Mg_Ca_mmol_per_mol || x.Mg_Ca || "",
+              delta13C: x.delta13C || x.δ13C || "",
+              delta18O: x.delta18O || x.δ18O || "",
+              Reference: x.Reference || ""
+            }));
+
+          renderTable(rows);
+        },
+        error: e => console.error("CSV Load Error:", e)
+      });
+    }
+
+    document.addEventListener("DOMContentLoaded", loadCSV);
+  </script>
+</body>
+</html>
