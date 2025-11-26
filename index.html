@@ -69,6 +69,14 @@
       font-size: 0.9rem;
       color: #555;
     }
+    .download-link a {
+      color: #1b3b5f;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .download-link a:hover {
+      text-decoration: underline;
+    }
   </style>
 </head>
 
@@ -94,15 +102,13 @@
         <thead>
           <tr>
             <th>Sample ID</th>
-            <th>Section</th>
-            <th>Formation</th>
-            <th>Period</th>
             <th>Age (Ma)</th>
             <th>I/Ca (μmol/mol)</th>
             <th>Mg/Ca (mmol/mol)</th>
             <th>δ13C (‰)</th>
             <th>δ18O (‰)</th>
             <th>Reference</th>
+            <th>DOI</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -123,45 +129,54 @@
   <script>
     let icaTable = null;
 
+    // 把数据渲染到表格
     function renderTable(rows) {
       const tbody = document.querySelector("#icaTable tbody");
       tbody.innerHTML = "";
 
       rows.forEach(row => {
         const tr = document.createElement("tr");
-        const addCell = v => {
+
+        function addCell(v, isLink) {
           const td = document.createElement("td");
-          td.textContent = v === null || v === undefined ? "" : v;
+          if (isLink && v) {
+            const a = document.createElement("a");
+            a.href = v;
+            a.textContent = v;
+            a.target = "_blank";
+            td.appendChild(a);
+          } else {
+            td.textContent = v === null || v === undefined ? "" : v;
+          }
           tr.appendChild(td);
-        };
+        }
 
         addCell(row.Sample_ID);
-        addCell(row.Section);
-        addCell(row.Formation);
-        addCell(row.Period);
         addCell(row.Age_Ma);
-        addCell(row.I_Ca);
-        addCell(row.Mg_Ca);
+        addCell(row.I_Ca_umol_per_mol);
+        addCell(row.Mg_Ca_mmol_per_mol);
         addCell(row.delta13C);
         addCell(row.delta18O);
         addCell(row.Reference);
+        addCell(row.DOI, true);  // DOI 显示为超链接
 
         tbody.appendChild(tr);
       });
 
       if (!icaTable) {
         icaTable = $("#icaTable").DataTable({
-          pageLength: 20,
-          order: [[4,"asc"]]
+          pageLength: 25,
+          order: [[1, "asc"]] // 按 Age 排序
         });
-
         icaTable.on("draw", updatePlot);
       } else {
         icaTable.clear();
-        $("#icaTable tbody tr").each(function(){
-          icaTable.row.add(
-            Array.from(this.cells).map(c=>c.textContent)
-          );
+        $("#icaTable tbody tr").each(function () {
+          const rowData = [];
+          $(this).find("td").each(function () {
+            rowData.push($(this).text());
+          });
+          icaTable.row.add(rowData);
         });
         icaTable.draw();
       }
@@ -169,21 +184,23 @@
       updatePlot();
     }
 
+    // 从当前表格（筛选后）更新 Age–I/Ca 图
     function updatePlot() {
       if (!icaTable) return;
-      const data = icaTable.rows({ search: "applied" }).data().toArray();
 
+      const data = icaTable.rows({ search: "applied" }).data().toArray();
       const ages = [];
       const icas = [];
       const labels = [];
 
-      data.forEach(r => {
-        const age = parseFloat(r[4]);
-        const ica = parseFloat(r[5]);
+      // 列索引：0=Sample, 1=Age, 2=I/Ca
+      data.forEach(row => {
+        const age = parseFloat(row[1]);
+        const ica = parseFloat(row[2]);
         if (!isNaN(age) && !isNaN(ica)) {
           ages.push(age);
           icas.push(ica);
-          labels.push(r[0]);
+          labels.push(row[0]);
         }
       });
 
@@ -193,42 +210,45 @@
         mode: "markers",
         type: "scatter",
         text: labels,
-        hovertemplate: "Sample: %{text}<br>Age: %{x} Ma<br>I/Ca: %{y}<extra></extra>",
+        hovertemplate:
+          "Sample: %{text}<br>Age: %{x} Ma<br>I/Ca: %{y} μmol/mol<extra></extra>",
+        marker: { size: 7, opacity: 0.8 }
       };
 
       const layout = {
-        xaxis: { title: "Age (Ma)", autorange: 'reversed' },
-        yaxis: { title: "I/Ca (μmol/mol)", rangemode: "tozero" },
-        margin: {t:20}
+        margin: { l: 60, r: 20, t: 20, b: 60 },
+        xaxis: { title: "Age (Ma)", autorange: "reversed" },
+        yaxis: { title: "I/Ca (μmol/mol)", rangemode: "tozero" }
       };
 
       Plotly.newPlot("icaPlot", [trace], layout, { responsive: true });
     }
 
+    // 读取 data/ica_database.csv，直接按你现在的表头字段映射
     function loadCSV() {
       Papa.parse("data/ica_database.csv", {
         download: true,
         header: true,
         dynamicTyping: true,
-        complete: r => {
-          const rows = r.data
-            .filter(x=>x.Sample_ID)
-            .map(x => ({
-              Sample_ID: x.Sample_ID,
-              Section: x.Section || "",
-              Formation: x.Formation || "",
-              Period: x.Period || "",
-              Age_Ma: x.Age_Ma,
-              I_Ca: x.I_Ca_umol_per_mol || x.I_Ca || x["I/Ca"] || "",
-              Mg_Ca: x.Mg_Ca_mmol_per_mol || x.Mg_Ca || "",
-              delta13C: x.delta13C || x.δ13C || "",
-              delta18O: x.delta18O || x.δ18O || "",
-              Reference: x.Reference || ""
+        complete: function (results) {
+          const rows = results.data
+            .filter(r => r.Sample_ID)  // 只保留有 Sample_ID 的行
+            .map(r => ({
+              Sample_ID: r.Sample_ID,
+              I_Ca_umol_per_mol: r.I_Ca_umol_per_mol,
+              Mg_Ca_mmol_per_mol: r.Mg_Ca_mmol_per_mol,
+              delta13C: r.delta13C,
+              delta18O: r.delta18O,
+              Age_Ma: r.Age_Ma,
+              Reference: r.Reference,
+              DOI: r.DOI
             }));
 
           renderTable(rows);
         },
-        error: e => console.error("CSV Load Error:", e)
+        error: function (err) {
+          console.error("Error loading CSV:", err);
+        }
       });
     }
 
