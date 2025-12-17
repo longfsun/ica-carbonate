@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Global Carbonate I/Ca Database</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- DataTables CSS -->
+  <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css" />
+
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f5f5f5;
+    }
+    header {
+      background: #1b3b5f;
+      color: #ffffff;
+      padding: 1rem 2rem;
+    }
+    header h1 { margin: 0; font-size: 1.6rem; }
+
+    main {
+      padding: 1rem 2rem 2rem;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    .section-title {
+      margin-top: 1.5rem;
+      margin-bottom: 0.5rem;
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: #333;
+    }
+
+    /* Controls */
+    .controls {
+      background: #ffffff;
+      border-radius: 6px;
+      box-shadow: 0 0 4px rgba(0,0,0,0.06);
+      padding: 0.75rem 1rem;
+      margin: 0.75rem 0 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem 1.25rem;
+      align-items: center;
+    }
+    .controls .label {
+      font-weight: 600;
+      color: #333;
+      margin-right: 0.25rem;
+    }
+    .controls label {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.95rem;
+      color: #444;
+      user-select: none;
+      cursor: pointer;
+    }
+    .controls input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+    }
+
+    /* Plots */
+    .plot {
+      width: 100%;
+      height: 450px;
+      background: #ffffff;
+      border-radius: 6px;
+      box-shadow: 0 0 4px rgba(0,0,0,0.06);
+      margin: 0.75rem 0 1.25rem;
+    }
+    .plot.small {
+      height: 360px;
+    }
+
+    .datatable-container {
+      background: #ffffff;
+      padding: 1rem;
+      border-radius: 6px;
+      box-shadow: 0 0 4px rgba(0,0,0,0.06);
+    }
+    footer {
+      text-align: center;
+      font-size: 0.8rem;
+      padding: 1rem 0 2rem;
+      color: #777;
+    }
+    table.dataTable thead th,
+    table.dataTable tbody td {
+      padding: 6px 8px;
+      font-size: 0.85rem;
+    }
+
+    .download-link {
+      margin: 0.75rem 0 0.25rem;
+      font-size: 0.9rem;
+      color: #555;
+    }
+    .download-link a {
+      color: #1b3b5f;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .download-link a:hover { text-decoration: underline; }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>Global Carbonate I/Ca Database</h1>
+  </header>
+
+  <main>
+    <!-- Controls -->
+    <div class="controls" aria-label="plot controls">
+      <span class="label">Show additional indicators:</span>
+      <label><input type="checkbox" id="showMgCa"> Mg/Ca (mmol/mol)</label>
+      <label><input type="checkbox" id="showD13C"> δ13C (‰)</label>
+      <label><input type="checkbox" id="showD18O"> δ18O (‰)</label>
+      <span style="color:#777;font-size:0.9rem;">(I/Ca is always displayed)</span>
+    </div>
+
+    <!-- Mandatory I/Ca plot -->
+    <div class="section-title">Age–I/Ca Scatter Plot (mandatory)</div>
+    <div id="icaPlot" class="plot"></div>
+
+    <!-- Optional plots -->
+    <div class="section-title">Optional indicator plots</div>
+    <div id="mgcaPlot" class="plot small" style="display:none;"></div>
+    <div id="d13cPlot" class="plot small" style="display:none;"></div>
+    <div id="d18oPlot" class="plot small" style="display:none;"></div>
+
+    <!-- Download full dataset -->
+    <div class="download-link">
+      <a href="data/ica_database.csv" download>Download full dataset (CSV)</a>
+    </div>
+
+    <!-- Data Browser Table -->
+    <div class="section-title">Data Browser</div>
+    <div class="datatable-container">
+      <table id="icaTable" class="display" style="width:100%">
+        <thead>
+          <tr>
+            <th>Sample ID</th>
+            <th>Age (Ma)</th>
+            <th>I/Ca (μmol/mol)</th>
+            <th>Mg/Ca (mmol/mol)</th>
+            <th>δ13C (‰)</th>
+            <th>δ18O (‰)</th>
+            <th>Reference</th>
+            <th>DOI</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </main>
+
+  <footer>
+    Carbonate I/Ca database portal (static prototype)
+  </footer>
+
+  <!-- JS libraries -->
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+  <script>
+    let icaTable = null;
+
+    function safeNumber(v) {
+      const n = parseFloat(v);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function getFilteredDataFromTable() {
+      if (!icaTable) return [];
+      return icaTable.rows({ search: "applied" }).data().toArray();
+    }
+
+    function buildTrace(rows, yColIndex, name, unit) {
+      const ages = [];
+      const ys = [];
+      const labels = [];
+
+      rows.forEach(r => {
+        const age = safeNumber(r[1]);
+        const y = safeNumber(r[yColIndex]);
+        if (age !== null && y !== null) {
+          ages.push(age);
+          ys.push(y);
+          labels.push(r[0]);
+        }
+      });
+
+      return {
+        x: ages,
+        y: ys,
+        mode: "markers",
+        type: "scatter",
+        name,
+        text: labels,
+        hovertemplate:
+          "Sample: %{text}<br>Age: %{x} Ma<br>" + name + ": %{y} " + unit + "<extra></extra>",
+        marker: { size: 7, opacity: 0.8 }
+      };
+    }
+
+    function plotScatter(divId, trace, yTitle) {
+      const layout = {
+        margin: { l: 70, r: 20, t: 20, b: 60 },
+        xaxis: { title: "Age (Ma)", autorange: "reversed" },
+        yaxis: { title: yTitle }
+      };
+      Plotly.newPlot(divId, [trace], layout, { responsive: true });
+    }
+
+    function updatePlots() {
+      if (!icaTable) return;
+
+      const rows = getFilteredDataFromTable();
+
+      // --- Mandatory I/Ca (col index 2) ---
+      const icaTrace = buildTrace(rows, 2, "I/Ca", "μmol/mol");
+      plotScatter("icaPlot", icaTrace, "I/Ca (μmol/mol)");
+
+      // --- Optional plots ---
+      const showMgCa = document.getElementById("showMgCa").checked;
+      const showD13C = document.getElementById("showD13C").checked;
+      const showD18O = document.getElementById("showD18O").checked;
+
+      // Mg/Ca (col index 3)
+      const mgcaDiv = document.getElementById("mgcaPlot");
+      mgcaDiv.style.display = showMgCa ? "block" : "none";
+      if (showMgCa) {
+        const t = buildTrace(rows, 3, "Mg/Ca", "mmol/mol");
+        plotScatter("mgcaPlot", t, "Mg/Ca (mmol/mol)");
+      } else {
+        Plotly.purge("mgcaPlot");
+      }
+
+      // δ13C (col index 4)
+      const d13cDiv = document.getElementById("d13cPlot");
+      d13cDiv.style.display = showD13C ? "block" : "none";
+      if (showD13C) {
+        const t = buildTrace(rows, 4, "δ13C", "‰");
+        plotScatter("d13cPlot", t, "δ13C (‰)");
+      } else {
+        Plotly.purge("d13cPlot");
+      }
+
+      // δ18O (col index 5)
+      const d18oDiv = document.getElementById("d18oPlot");
+      d18oDiv.style.display = showD18O ? "block" : "none";
+      if (showD18O) {
+        const t = buildTrace(rows, 5, "δ18O", "‰");
+        plotScatter("d18oPlot", t, "δ18O (‰)");
+      } else {
+        Plotly.purge("d18oPlot");
+      }
+    }
+
+    function renderTable(rows) {
+      const tbody = document.querySelector("#icaTable tbody");
+      tbody.innerHTML = "";
+
+      rows.forEach(row => {
+        const tr = document.createElement("tr");
+
+        function addCell(v, isLink) {
+          const td = document.createElement("td");
+          if (isLink && v) {
+            const a = document.createElement("a");
+            // DOI 允许填 DOI 或 URL
+            const url = (String(v).startsWith("http")) ? v : ("https://doi.org/" + v);
+            a.href = url;
+            a.textContent = v;
+            a.target = "_blank";
+            td.appendChild(a);
+          } else {
+            td.textContent = (v === null || v === undefined) ? "" : v;
+          }
+          tr.appendChild(td);
+        }
+
+        addCell(row.Sample_ID);
+        addCell(row.Age_Ma);
+        addCell(row.I_Ca_umol_per_mol);
+        addCell(row.Mg_Ca_mmol_per_mol);
+        addCell(row.delta13C);
+        addCell(row.delta18O);
+        addCell(row.Reference);
+        addCell(row.DOI, true);
+
+        tbody.appendChild(tr);
+      });
+
+      if (!icaTable) {
+        icaTable = $("#icaTable").DataTable({
+          pageLength: 25,
+          order: [[1, "asc"]]
+        });
+        icaTable.on("draw", updatePlots);
+      } else {
+        icaTable.clear();
+        $("#icaTable tbody tr").each(function () {
+          const rowData = [];
+          $(this).find("td").each(function () {
+            rowData.push($(this).text());
+          });
+          icaTable.row.add(rowData);
+        });
+        icaTable.draw();
+      }
+
+      updatePlots();
+    }
+
+    function loadCSV() {
+      Papa.parse("data/ica_database.csv", {
+        download: true,
+        header: true,
+        dynamicTyping: true,
+        complete: function (results) {
+          const rows = results.data
+            .filter(r => r.Sample_ID)
+            .map(r => ({
+              Sample_ID: r.Sample_ID,
+              I_Ca_umol_per_mol: r.I_Ca_umol_per_mol,
+              Mg_Ca_mmol_per_mol: r.Mg_Ca_mmol_per_mol,
+              delta13C: r.delta13C,
+              delta18O: r.delta18O,
+              Age_Ma: r.Age_Ma,
+              Reference: r.Reference,
+              DOI: r.DOI
+            }));
+
+          renderTable(rows);
+        },
+        error: function (err) {
+          console.error("Error loading CSV:", err);
+        }
+      });
+    }
+
+    function bindControls() {
+      ["showMgCa", "showD13C", "showD18O"].forEach(id => {
+        document.getElementById(id).addEventListener("change", updatePlots);
+      });
+    }
+
+    document.addEventListener("DOMContentLoaded", function () {
+      bindControls();
+      loadCSV();
+    });
+  </script>
+</body>
+</html>
