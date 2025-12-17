@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Global Carbonate I/Ca Database</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- DataTables CSS -->
+  <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css" />
+
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f5f5f5;
+    }
+    header {
+      background: #1b3b5f;
+      color: #ffffff;
+      padding: 1rem 2rem;
+    }
+    header h1 { margin: 0; font-size: 1.6rem; }
+
+    main {
+      padding: 1rem 2rem 2rem;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    .section-title {
+      margin-top: 1.5rem;
+      margin-bottom: 0.5rem;
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: #333;
+    }
+
+    /* Controls */
+    .controls {
+      background: #ffffff;
+      border-radius: 6px;
+      box-shadow: 0 0 4px rgba(0,0,0,0.06);
+      padding: 0.75rem 1rem;
+      margin: 0.75rem 0 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem 1.25rem;
+      align-items: center;
+    }
+    .controls .label {
+      font-weight: 600;
+      color: #333;
+      margin-right: 0.25rem;
+    }
+    .controls label {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.95rem;
+      color: #444;
+      user-select: none;
+      cursor: pointer;
+    }
+    .controls input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+    }
+
+    /* Plots */
+    .plot {
+      width: 100%;
+      height: 450px;
+      background: #ffffff;
+      border-radius: 6px;
+      box-shadow: 0 0 4px rgba(0,0,0,0.06);
+      margin: 0.75rem 0 1.25rem;
+    }
+    .plot.small { height: 360px; }
+
+    .datatable-container {
+      background: #ffffff;
+      padding: 1rem;
+      border-radius: 6px;
+      box-shadow: 0 0 4px rgba(0,0,0,0.06);
+    }
+    footer {
+      text-align: center;
+      font-size: 0.8rem;
+      padding: 1rem 0 2rem;
+      color: #777;
+    }
+    table.dataTable thead th,
+    table.dataTable tbody td {
+      padding: 6px 8px;
+      font-size: 0.85rem;
+    }
+
+    .download-link {
+      margin: 0.75rem 0 0.25rem;
+      font-size: 0.9rem;
+      color: #555;
+    }
+    .download-link a {
+      color: #1b3b5f;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .download-link a:hover { text-decoration: underline; }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>Global Carbonate I/Ca Database</h1>
+  </header>
+
+  <main>
+    <!-- Controls -->
+    <div class="controls" aria-label="plot controls">
+      <span class="label">Show additional indicators:</span>
+      <label><input type="checkbox" id="showMgCa"> Mg/Ca (mol/mol)</label>
+      <label><input type="checkbox" id="showD13C"> δ13C (‰)</label>
+      <label><input type="checkbox" id="showD18O"> δ18O (‰)</label>
+      <span style="color:#777;font-size:0.9rem;">(I/Ca is always displayed; x-axis synchronized)</span>
+    </div>
+
+    <!-- Mandatory I/Ca plot -->
+    <div class="section-title">Age–I/Ca Scatter Plot (mandatory)</div>
+    <div id="icaPlot" class="plot"></div>
+
+    <!-- Optional plots -->
+    <div class="section-title">Optional indicator plots</div>
+    <div id="mgcaPlot" class="plot small" style="display:none;"></div>
+    <div id="d13cPlot" class="plot small" style="display:none;"></div>
+    <div id="d18oPlot" class="plot small" style="display:none;"></div>
+
+    <!-- Download full dataset -->
+    <div class="download-link">
+      <a href="data/ica_database.csv" download>Download full dataset (CSV)</a>
+    </div>
+
+    <!-- Data Browser Table -->
+    <div class="section-title">Data Browser</div>
+    <div class="datatable-container">
+      <table id="icaTable" class="display" style="width:100%">
+        <thead>
+          <tr>
+            <th>Sample ID</th>
+            <th>Age (Ma)</th>
+            <th>I/Ca (μmol/mol)</th>
+            <th>Mg/Ca (mol/mol)</th>
+            <th>δ13C (‰)</th>
+            <th>δ18O (‰)</th>
+            <th>Reference</th>
+            <th>DOI</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </main>
+
+  <footer>
+    Carbonate I/Ca database portal (static prototype)
+  </footer>
+
+  <!-- JS libraries -->
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+  <script>
+    let icaTable = null;
+
+    // 当前 I/Ca 主图的 x 轴范围（用来强制其他图一致）
+    // 注意：Age 轴在视觉上是 reversed（老在左，新在右），range 应写为 [maxAge, minAge]
+    let currentXRange = null;
+
+    // 避免 plotly_relayout 引发循环同步
+    let isSyncing = false;
+
+    function safeNumber(v) {
+      const n = parseFloat(v);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function getFilteredDataFromTable() {
+      if (!icaTable) return [];
+      return icaTable.rows({ search: "applied" }).data().toArray();
+    }
+
+    function buildTrace(rows, yColIndex, name, unit) {
+      const ages = [];
+      const ys = [];
+      const labels = [];
+
+      rows.forEach(r => {
+        const age = safeNumber(r[1]);
+        const y = safeNumber(r[yColIndex]);
+        if (age !== null && y !== null) {
+          ages.push(age);
+          ys.push(y);
+          labels.push(r[0]);
+        }
+      });
+
+      return {
+        x: ages,
+        y: ys,
+        mode: "markers",
+        type: "scatter",
+        name,
+        text: labels,
+        hovertemplate:
+          "Sample: %{text}<br>Age: %{x} Ma<br>" + name + ": %{y} " + unit + "<extra></extra>",
+        marker: { size: 7, opacity: 0.8 }
+      };
+    }
+
+    // 统一画图函数：强制 x 轴范围与方向一致
+    function plotScatter(divId, trace, yTitle, xRange) {
+      const layout = {
+        margin: { l: 70, r: 20, t: 20, b: 60 },
+        xaxis: {
+          title: "Age (Ma)",
+          autorange: false,
+          range: xRange,     // 强制统一范围
+          fixedrange: false
+        },
+        yaxis: { title: yTitle }
+      };
+      Plotly.newPlot(divId, [trace], layout, { responsive: true });
+    }
+
+    // 把 I/Ca 主图的 xRange 同步到其它图（只同步 x 轴）
+    function syncXRangeToOptionalPlots(xRange) {
+      const ids = ["mgcaPlot", "d13cPlot", "d18oPlot"];
+      ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el || el.style.display === "none") return;
+        Plotly.relayout(id, { "xaxis.range": xRange });
+      });
+    }
+
+    // 绑定 I/Ca 图的缩放/平移事件，让它作为“主控轴”
+    function bindMainPlotRelayout() {
+      const el = document.getElementById("icaPlot");
+      if (!el) return;
+
+      // Plotly 会把事件绑在 div 上（其内部会有 el.on）
+      el.on("plotly_relayout", (e) => {
+        if (isSyncing) return;
+
+        // 捕获 x 轴 range（两种可能写法：xaxis.range[0]/[1] 或 xaxis.range）
+        let r0 = e["xaxis.range[0]"];
+        let r1 = e["xaxis.range[1]"];
+        if (r0 === undefined || r1 === undefined) {
+          const r = e["xaxis.range"];
+          if (Array.isArray(r) && r.length === 2) {
+            r0 = r[0]; r1 = r[1];
+          }
+        }
+
+        // 双击 reset 会触发 autorange
+        if (e["xaxis.autorange"] === true) {
+          // 回到当前数据的全范围（updatePlots 里会重算）
+          updatePlots();
+          return;
+        }
+
+        if (r0 !== undefined && r1 !== undefined) {
+          currentXRange = [r0, r1];
+          isSyncing = true;
+          syncXRangeToOptionalPlots(currentXRange);
+          isSyncing = false;
+        }
+      });
+    }
+
+    function updatePlots() {
+      if (!icaTable) return;
+
+      const rows = getFilteredDataFromTable();
+
+      // --- Mandatory I/Ca (主控) ---
+      const icaTrace = buildTrace(rows, 2, "I/Ca", "μmol/mol");
+
+      // 如果用户之前没有缩放，就用当前数据范围；如果已经缩放过，就保持缩放范围不变
+      if (!currentXRange) {
+        const ages = (icaTrace.x || []).filter(v => Number.isFinite(v));
+        const maxAge = ages.length ? Math.max(...ages) : 4000;
+        const minAge = ages.length ? Math.min(...ages) : 0;
+        currentXRange = [maxAge, minAge]; // reversed
+      }
+
+      plotScatter("icaPlot", icaTrace, "I/Ca (μmol/mol)", currentXRange);
+
+      // 确保主图 relayout 事件只绑一次（newPlot 会重建）
+      bindMainPlotRelayout();
+
+      // --- Optional plots（全部用 currentXRange 强制一致） ---
+      const showMgCa = document.getElementById("showMgCa").checked;
+      const showD13C = document.getElementById("showD13C").checked;
+      const showD18O = document.getElementById("showD18O").checked;
+
+      // Mg/Ca (col index 3)
+      const mgcaDiv = document.getElementById("mgcaPlot");
+      mgcaDiv.style.display = showMgCa ? "block" : "none";
+      if (showMgCa) {
+        const t = buildTrace(rows, 3, "Mg/Ca", "mol/mol");
+        plotScatter("mgcaPlot", t, "Mg/Ca (mol/mol)", currentXRange);
+      } else {
+        Plotly.purge("mgcaPlot");
+      }
+
+      // δ13C (col index 4)
+      const d13cDiv = document.getElementById("d13cPlot");
+      d13cDiv.style.display = showD13C ? "block" : "none";
+      if (showD13C) {
+        const t = buildTrace(rows, 4, "δ13C", "‰");
+        plotScatter("d13cPlot", t, "δ13C (‰)", currentXRange);
+      } else {
+        Plotly.purge("d13cPlot");
+      }
+
+      // δ18O (col index 5)
+      const d18oDiv = document.getElementById("d18oPlot");
+      d18oDiv.style.display = showD18O ? "block" : "none";
+      if (showD18O) {
+        const t = buildTrace(rows, 5, "δ18O", "‰");
+        plotScatter("d18oPlot", t, "δ18O (‰)", currentXRange);
+      } else {
+        Plotly.purge("d18oPlot");
+      }
+
+      // 如果可选图显示了，确保它们被强制同步到主图范围（防止首次渲染的轻微差异）
+      isSyncing = true;
+      syncXRangeToOptionalPlots(currentXRange);
+      isSyncing = false;
+    }
+
+    function renderTable(rows) {
+      const tbody = document.querySelector("#icaTable tbody");
+      tbody.innerHTML = "";
+
+      rows.forEach(row => {
+        const tr = document.createElement("tr");
+
+        function addCell(v, isLink) {
+          const td = document.createElement("td");
+          if (isLink && v) {
+            const a = document.createElement("a");
+            const vv = String(v).trim();
+            const url = vv.startsWith("http") ? vv : ("https://doi.org/" + vv);
+            a.href = url;
+            a.textContent = url; // 直接显示规范化 URL（你也可以改回显示原 DOI）
+            a.target = "_blank";
+            td.appendChild(a);
+          } else {
+            td.textContent = (v === null || v === undefined) ? "" : v;
+          }
+          tr.appendChild(td);
+        }
+
+        addCell(row.Sample_ID);
+        addCell(row.Age_Ma);
+        addCell(row.I_Ca_umol_per_mol);
+        addCell(row.Mg_Ca_mol_per_mol);
+        addCell(row.delta13C);
+        addCell(row.delta18O);
+        addCell(row.Reference);
+        addCell(row.DOI, true);
+
+        tbody.appendChild(tr);
+      });
+
+      if (!icaTable) {
+        icaTable = $("#icaTable").DataTable({
+          pageLength: 25,
+          order: [[1, "asc"]]
+        });
+        icaTable.on("draw", () => {
+          // 表格筛选/分页变化 → 图同步重绘，但保持 currentXRange（如果用户已缩放）
+          updatePlots();
+        });
+      } else {
+        icaTable.clear();
+        $("#icaTable tbody tr").each(function () {
+          const rowData = [];
+          $(this).find("td").each(function () {
+            rowData.push($(this).text());
+          });
+          icaTable.row.add(rowData);
+        });
+        icaTable.draw();
+      }
+
+      updatePlots();
+    }
+
+    function loadCSV() {
+      Papa.parse("data/ica_database.csv", {
+        download: true,
+        header: true,
+        dynamicTyping: true,
+        complete: function (results) {
+          const rows = results.data
+            .filter(r => r.Sample_ID)
+            .map(r => ({
+              Sample_ID: r.Sample_ID,
+              I_Ca_umol_per_mol: r.I_Ca_umol_per_mol,
+              Mg_Ca_mol_per_mol: r.Mg_Ca_mol_per_mol,
+              delta13C: r.delta13C,
+              delta18O: r.delta18O,
+              Age_Ma: r.Age_Ma,
+              Reference: r.Reference,
+              DOI: r.DOI
+            }));
+
+          renderTable(rows);
+        },
+        error: function (err) {
+          console.error("Error loading CSV:", err);
+        }
+      });
+    }
+
+    function bindControls() {
+      ["showMgCa", "showD13C", "showD18O"].forEach(id => {
+        document.getElementById(id).addEventListener("change", () => {
+          // 切换可选图显示时，不改变 currentXRange
+          updatePlots();
+        });
+      });
+    }
+
+    document.addEventListener("DOMContentLoaded", function () {
+      bindControls();
+      loadCSV();
+    });
+  </script>
+</body>
+</html>
